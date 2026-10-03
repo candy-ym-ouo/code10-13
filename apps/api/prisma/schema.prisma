@@ -81,6 +81,19 @@ enum GoalStatus {
   CANCELLED
 }
 
+enum PlanStatus {
+  DRAFT
+  LOCKED
+  ARCHIVED
+}
+
+enum PlanOriginType {
+  SCRATCH
+  TEMPLATE
+  PLAN_COPY
+  REVISION
+}
+
 model User {
   id                String           @id @default(uuid()) @db.Uuid
   email             String           @unique @db.VarChar(254)
@@ -98,6 +111,9 @@ model User {
   annotations       Annotation[]
   goals             Goal[]
   goalProgresses    GoalProgress[]
+  planTemplates     PlanTemplate[]
+  practicePlans     PracticePlan[]
+  planTaskEvidences PlanTaskEvidence[]
   auditLogs         AuditLog[]
   dataExports       DataExport[]
 
@@ -178,6 +194,7 @@ model MediaAsset {
   session        PracticeSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
   annotations    Annotation[]
   goalProgresses GoalProgress[]
+  planTaskEvidences PlanTaskEvidence[]
 
   @@index([userId, sha256])
   @@index([objectKey])
@@ -310,4 +327,135 @@ model AuditLog {
   @@index([userId, createdAt(sort: Desc)])
   @@index([action, createdAt(sort: Desc)])
   @@map("audit_logs")
+}
+
+model PlanTemplate {
+  id          String   @id @default(uuid()) @db.Uuid
+  userId      String   @map("user_id") @db.Uuid
+  name        String   @db.VarChar(120)
+  goal        String   @db.VarChar(300)
+  description String?
+  /// 谱系：模板从哪个计划另存而来（从零创建则为空）
+  sourcePlanId String?  @map("source_plan_id") @db.Uuid
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sourcePlan  PracticePlan? @relation("TemplateSource", fields: [sourcePlanId], references: [id], onDelete: SetNull)
+  stages      PlanTemplateStage[]
+  instances   PracticePlan[] @relation("TemplateInstances")
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@map("plan_templates")
+}
+
+model PlanTemplateStage {
+  id         String   @id @default(uuid()) @db.Uuid
+  templateId String   @map("template_id") @db.Uuid
+  title      String   @db.VarChar(120)
+  order      Int
+  template   PlanTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  tasks      PlanTemplateTask[]
+
+  @@index([templateId, order])
+  @@map("plan_template_stages")
+}
+
+model PlanTemplateTask {
+  id               String   @id @default(uuid()) @db.Uuid
+  stageId          String   @map("stage_id") @db.Uuid
+  title            String   @db.VarChar(160)
+  detail           String?
+  requiredEvidence Int      @default(1) @map("required_evidence") @db.SmallInt
+  weight           Float    @default(1)
+  order            Int
+  stage            PlanTemplateStage @relation(fields: [stageId], references: [id], onDelete: Cascade)
+
+  @@index([stageId, order])
+  @@map("plan_template_tasks")
+}
+
+model PracticePlan {
+  id           String   @id @default(uuid()) @db.Uuid
+  userId       String   @map("user_id") @db.Uuid
+  goal         String   @db.VarChar(300)
+  status       PlanStatus @default(DRAFT)
+  /// 业务版本号：改版新建版本时 +1，复制/实例化从 1 开始
+  version      Int      @default(1)
+  /// 乐观锁：结构与目标修改时递增
+  revision     Int      @default(0)
+  originType   PlanOriginType @default(SCRATCH) @map("origin_type")
+  /// 谱系：实例化来源模板
+  originTemplateId String? @map("origin_template_id") @db.Uuid
+  /// 谱系：上一版本（REVISION）或复制来源（PLAN_COPY）
+  originPlanId String?  @map("origin_plan_id") @db.Uuid
+  originPlanVersion Int? @map("origin_plan_version")
+  lockedAt     DateTime? @map("locked_at") @db.Timestamptz(6)
+  archivedAt   DateTime? @map("archived_at") @db.Timestamptz(6)
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  originTemplate PlanTemplate? @relation("TemplateInstances", fields: [originTemplateId], references: [id], onDelete: SetNull)
+  originPlan   PracticePlan?  @relation("PlanLineage", fields: [originPlanId], references: [id], onDelete: SetNull)
+  derivedPlans PracticePlan[] @relation("PlanLineage")
+  savedTemplates PlanTemplate[] @relation("TemplateSource")
+  stages       PlanStage[]
+  evidences    PlanTaskEvidence[]
+
+  @@index([userId, status, updatedAt(sort: Desc)])
+  @@index([originPlanId])
+  @@map("practice_plans")
+}
+
+model PlanStage {
+  id     String @id @default(uuid()) @db.Uuid
+  planId String @map("plan_id") @db.Uuid
+  title  String @db.VarChar(120)
+  order  Int
+  /// 谱系：来源阶段 id（模板阶段或上一版本阶段，可能跨表，故不做外键）
+  derivedFromStageId String? @map("derived_from_stage_id") @db.Uuid
+  plan   PracticePlan @relation(fields: [planId], references: [id], onDelete: Cascade)
+  tasks  PlanTask[]
+
+  @@index([planId, order])
+  @@map("plan_stages")
+}
+
+model PlanTask {
+  id               String  @id @default(uuid()) @db.Uuid
+  stageId          String  @map("stage_id") @db.Uuid
+  title            String  @db.VarChar(160)
+  detail           String?
+  requiredEvidence Int     @default(1) @map("required_evidence") @db.SmallInt
+  weight           Float   @default(1)
+  order            Int
+  /// 谱系：来源任务 id（模板任务或上一版本任务，可能跨表，故不做外键）
+  derivedFromTaskId String? @map("derived_from_task_id") @db.Uuid
+  stage            PlanStage @relation(fields: [stageId], references: [id], onDelete: Cascade)
+  evidences        PlanTaskEvidence[]
+
+  @@index([stageId, order])
+  @@map("plan_tasks")
+}
+
+model PlanTaskEvidence {
+  id      String  @id @default(uuid()) @db.Uuid
+  userId  String  @map("user_id") @db.Uuid
+  planId  String  @map("plan_id") @db.Uuid
+  taskId  String  @map("task_id") @db.Uuid
+  mediaId String  @map("media_id") @db.Uuid
+  note    String? @db.VarChar(500)
+  /// 谱系：改版时从上一版本的哪条证据继承而来
+  inheritedFromId String? @map("inherited_from_id") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  plan      PracticePlan @relation(fields: [planId], references: [id], onDelete: Cascade)
+  task      PlanTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  media     MediaAsset @relation(fields: [mediaId], references: [id], onDelete: Cascade)
+  inheritedFrom PlanTaskEvidence?  @relation("EvidenceInheritance", fields: [inheritedFromId], references: [id], onDelete: SetNull)
+  inheritedClones PlanTaskEvidence[] @relation("EvidenceInheritance")
+
+  /// 同一段音频在同一任务上只计一次证据
+  @@unique([taskId, mediaId])
+  @@index([planId])
+  @@map("plan_task_evidence")
 }

@@ -114,6 +114,55 @@ Refresh Cookie 路径为 `/api/v1/auth`，生产环境在 HTTPS 下自动使用 
 
 完成复盘请求会原子写入复盘、目标、进度并更新练习状态。任一步失败时全部回滚，返回 `REVIEW_INCOMPLETE` 且 `details` 为缺失项数组。
 
+## 练习计划编排
+
+计划把目标拆成有序阶段与任务，任务按 `requiredEvidence` 要求音频证据个数，进度由证据实时复算。
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET/POST | `/plans` | 计划列表（含进度摘要）/从零创建 |
+| GET/PATCH | `/plans/:id` | 计划详情/更新目标（仅草稿，需带 `revision`） |
+| PUT | `/plans/:id/structure` | 结构整体替换（仅草稿，需带 `revision`；携带已有阶段/任务 `id` 表示保留） |
+| POST | `/plans/:id/lock` | 锁定进入执行期；结构不完整时返回 `PLAN_LOCK_BLOCKED` 及缺失项 |
+| POST | `/plans/:id/revise` | 改版：旧版本归档为不可变快照，新建 `version+1` 草稿并继承证据 |
+| POST | `/plans/:id/copy` | 复制为全新执行实例（v1 草稿，不带证据），谱系指向来源 |
+| POST | `/plans/:id/save-as-template` | 把当前结构另存为模板 |
+| GET | `/plans/:id/progress` | 复算进度（阶段/任务明细 + 加权汇总） |
+| GET | `/plans/:id/lineage` | 谱系链：从当前计划回溯到模板或更早版本 |
+| POST | `/plans/:id/tasks/:taskId/evidence` | 挂载音频证据（仅锁定中；媒体须为本人 `READY` 音频） |
+| DELETE | `/plans/:id/evidence/:evidenceId` | 移除证据（仅锁定中） |
+
+状态机：`DRAFT`（结构可编辑）→ `LOCKED`（结构冻结，可挂证据）→ 改版后旧版本 `ARCHIVED`。`version` 是业务版本号（改版 +1），`revision` 是乐观锁。
+
+创建计划（模板实例化、复制与另存模板请求体结构相同）：
+
+```json
+{
+  "goal": "四周拿下《克莱采尔》第 2 课",
+  "stages": [
+    {
+      "title": "第一阶段：慢练",
+      "tasks": [
+        { "title": "1-8 小节 60 BPM 连续三遍无错", "requiredEvidence": 3, "weight": 2 },
+        { "title": "换把位音准抽查", "requiredEvidence": 1, "weight": 1 }
+      ]
+    }
+  ]
+}
+```
+
+## 计划模板
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET/POST | `/plan-templates` | 模板列表/创建（至少一个阶段） |
+| GET | `/plan-templates/:id` | 模板详情 |
+| POST | `/plan-templates/:id/instantiate` | 实例化为 v1 草稿计划，谱系指向模板 |
+
+谱系规则：实例化记录 `originTemplateId`；复制记录 `originPlanId`/`originPlanVersion`；改版同理并递增 `version`；另存模板记录 `sourcePlanId`。阶段与任务上的 `derivedFrom*Id` 记录结构级来源，`evidence.inheritedFromId` 记录证据继承来源。`/plans/:id/lineage` 沿这些指针从近到远返回完整链路。
+
+进度口径：任务完成 ⇔ 证据数 ≥ `requiredEvidence`；阶段与整体按任务 `weight` 加权汇总。进度不落库，每次读取都用最新任务与证据整体复算，因此删除证据、改版继承或音频被清理后重算结果自动一致。
+
 ## 统计与导出
 
 | 方法 | 路径 | 说明 |
