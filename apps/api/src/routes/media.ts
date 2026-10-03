@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import path from "node:path";
 import type { FastifyPluginAsync } from "fastify";
 import { z } from "zod";
+import { mediaListQuerySchema } from "@practice/contracts";
 import { getConfig } from "../config/env.js";
 import { AppError, notFound } from "../lib/errors.js";
 import { prisma } from "../lib/prisma.js";
@@ -173,6 +174,28 @@ const mediaRoutes: FastifyPluginAsync = async (app) => {
     }
     await audit(request, "MEDIA_UPLOADED", "MEDIA_ASSET", media.id, "SUCCESS");
     return { media: updated, probeQueued: true };
+  });
+
+  app.get("/media", async (request) => {
+    const query = parseOrThrow(mediaListQuerySchema, request.query);
+    const data = await prisma.mediaAsset.findMany({
+      where: { userId: request.authUser!.id, status: query.status },
+      take: query.limit + 1,
+      ...(query.cursor ? { cursor: { id: query.cursor }, skip: 1 } : {}),
+      orderBy: [{ createdAt: "desc" }, { id: "asc" }],
+      select: {
+        id: true,
+        sessionId: true,
+        status: true,
+        originalName: true,
+        durationMs: true,
+        createdAt: true,
+        session: { select: { id: true, title: true } },
+      },
+    });
+    const hasMore = data.length > query.limit;
+    const items = hasMore ? data.slice(0, query.limit) : data;
+    return { data: items, nextCursor: hasMore ? items.at(-1)?.id ?? null : null };
   });
 
   app.get("/media/:mediaId", async (request) => {

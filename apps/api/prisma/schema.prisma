@@ -81,23 +81,41 @@ enum GoalStatus {
   CANCELLED
 }
 
+enum PlanStatus {
+  DRAFT
+  ACTIVE
+  COMPLETED
+  ARCHIVED
+}
+
+enum PlanTaskStatus {
+  PENDING
+  IN_PROGRESS
+  DONE
+  SKIPPED
+}
+
 model User {
-  id                String           @id @default(uuid()) @db.Uuid
-  email             String           @unique @db.VarChar(254)
-  passwordHash      String           @map("password_hash")
-  displayName       String           @map("display_name") @db.VarChar(80)
-  defaultInstrument String?          @map("default_instrument") @db.VarChar(60)
-  timezone          String           @default("Asia/Shanghai") @db.VarChar(64)
-  locale            String           @default("zh-CN") @db.VarChar(16)
-  status            UserStatus       @default(ACTIVE)
-  createdAt         DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt         DateTime         @updatedAt @map("updated_at") @db.Timestamptz(6)
+  id                String             @id @default(uuid()) @db.Uuid
+  email             String             @unique @db.VarChar(254)
+  passwordHash      String             @map("password_hash")
+  displayName       String             @map("display_name") @db.VarChar(80)
+  defaultInstrument String?            @map("default_instrument") @db.VarChar(60)
+  timezone          String             @default("Asia/Shanghai") @db.VarChar(64)
+  locale            String             @default("zh-CN") @db.VarChar(16)
+  status            UserStatus         @default(ACTIVE)
+  createdAt         DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
   refreshSessions   RefreshSession[]
   practiceSessions  PracticeSession[]
   mediaAssets       MediaAsset[]
   annotations       Annotation[]
   goals             Goal[]
   goalProgresses    GoalProgress[]
+  practicePlans     PracticePlan[]
+  planPhases        PlanPhase[]
+  planTasks         PlanTask[]
+  planTaskEvidences PlanTaskEvidence[]
   auditLogs         AuditLog[]
   dataExports       DataExport[]
 
@@ -124,22 +142,22 @@ model RefreshSession {
 }
 
 model PracticeSession {
-  id               String             @id @default(uuid()) @db.Uuid
-  userId           String             @map("user_id") @db.Uuid
-  title            String             @db.VarChar(120)
-  instrument       String             @db.VarChar(60)
-  focus            String?            @db.VarChar(500)
-  location         String?            @db.VarChar(120)
+  id               String         @id @default(uuid()) @db.Uuid
+  userId           String         @map("user_id") @db.Uuid
+  title            String         @db.VarChar(120)
+  instrument       String         @db.VarChar(60)
+  focus            String?        @db.VarChar(500)
+  location         String?        @db.VarChar(120)
   notes            String?
-  startedAt        DateTime           @map("started_at") @db.Timestamptz(6)
-  actualDurationMs BigInt             @default(0) @map("actual_duration_ms")
-  status           SessionStatus      @default(DRAFT)
-  completedAt      DateTime?          @map("completed_at") @db.Timestamptz(6)
-  archivedAt       DateTime?          @map("archived_at") @db.Timestamptz(6)
-  version          Int                @default(0)
-  createdAt        DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt        DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
-  user             User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  startedAt        DateTime       @map("started_at") @db.Timestamptz(6)
+  actualDurationMs BigInt         @default(0) @map("actual_duration_ms")
+  status           SessionStatus  @default(DRAFT)
+  completedAt      DateTime?      @map("completed_at") @db.Timestamptz(6)
+  archivedAt       DateTime?      @map("archived_at") @db.Timestamptz(6)
+  version          Int            @default(0)
+  createdAt        DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime       @updatedAt @map("updated_at") @db.Timestamptz(6)
+  user             User           @relation(fields: [userId], references: [id], onDelete: Cascade)
   mediaAssets      MediaAsset[]
   annotations      Annotation[]
   goals            Goal[]
@@ -153,31 +171,32 @@ model PracticeSession {
 }
 
 model MediaAsset {
-  id             String          @id @default(uuid()) @db.Uuid
-  userId         String          @map("user_id") @db.Uuid
-  sessionId      String          @map("session_id") @db.Uuid
-  status         MediaStatus     @default(PENDING_UPLOAD)
-  objectKey      String          @map("object_key")
-  originalName   String          @map("original_name") @db.VarChar(255)
-  mimeType       String          @map("mime_type") @db.VarChar(100)
-  sizeBytes      BigInt          @map("size_bytes")
-  sha256         String          @db.Char(64)
-  durationMs     BigInt?         @map("duration_ms")
-  codec          String?         @db.VarChar(64)
-  sampleRate     Int?            @map("sample_rate")
-  channels       Int?            @db.SmallInt
-  peaks          Json?
-  failureCode    String?         @map("failure_code") @db.VarChar(64)
-  failureMessage String?         @map("failure_message") @db.VarChar(500)
-  uploadedAt     DateTime?       @map("uploaded_at") @db.Timestamptz(6)
-  processedAt    DateTime?       @map("processed_at") @db.Timestamptz(6)
-  expiresAt      DateTime?       @map("expires_at") @db.Timestamptz(6)
-  createdAt      DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt      DateTime        @updatedAt @map("updated_at") @db.Timestamptz(6)
-  user           User            @relation(fields: [userId], references: [id], onDelete: Cascade)
-  session        PracticeSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-  annotations    Annotation[]
-  goalProgresses GoalProgress[]
+  id                String             @id @default(uuid()) @db.Uuid
+  userId            String             @map("user_id") @db.Uuid
+  sessionId         String             @map("session_id") @db.Uuid
+  status            MediaStatus        @default(PENDING_UPLOAD)
+  objectKey         String             @map("object_key")
+  originalName      String             @map("original_name") @db.VarChar(255)
+  mimeType          String             @map("mime_type") @db.VarChar(100)
+  sizeBytes         BigInt             @map("size_bytes")
+  sha256            String             @db.Char(64)
+  durationMs        BigInt?            @map("duration_ms")
+  codec             String?            @db.VarChar(64)
+  sampleRate        Int?               @map("sample_rate")
+  channels          Int?               @db.SmallInt
+  peaks             Json?
+  failureCode       String?            @map("failure_code") @db.VarChar(64)
+  failureMessage    String?            @map("failure_message") @db.VarChar(500)
+  uploadedAt        DateTime?          @map("uploaded_at") @db.Timestamptz(6)
+  processedAt       DateTime?          @map("processed_at") @db.Timestamptz(6)
+  expiresAt         DateTime?          @map("expires_at") @db.Timestamptz(6)
+  createdAt         DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
+  user              User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  session           PracticeSession    @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  annotations       Annotation[]
+  goalProgresses    GoalProgress[]
+  planTaskEvidences PlanTaskEvidence[]
 
   @@index([userId, sha256])
   @@index([objectKey])
@@ -187,22 +206,22 @@ model MediaAsset {
 }
 
 model Annotation {
-  id          String         @id @default(uuid()) @db.Uuid
-  userId      String         @map("user_id") @db.Uuid
-  sessionId   String         @map("session_id") @db.Uuid
-  mediaId     String         @map("media_id") @db.Uuid
+  id          String          @id @default(uuid()) @db.Uuid
+  userId      String          @map("user_id") @db.Uuid
+  sessionId   String          @map("session_id") @db.Uuid
+  mediaId     String          @map("media_id") @db.Uuid
   type        AnnotationType
-  severity    Int            @db.SmallInt
-  startMs     BigInt         @map("start_ms")
-  endMs       BigInt         @map("end_ms")
-  title       String         @db.VarChar(80)
+  severity    Int             @db.SmallInt
+  startMs     BigInt          @map("start_ms")
+  endMs       BigInt          @map("end_ms")
+  title       String          @db.VarChar(80)
   description String?
-  nextAction  String?        @map("next_action")
-  createdAt   DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt   DateTime       @updatedAt @map("updated_at") @db.Timestamptz(6)
-  user        User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  nextAction  String?         @map("next_action")
+  createdAt   DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime        @updatedAt @map("updated_at") @db.Timestamptz(6)
+  user        User            @relation(fields: [userId], references: [id], onDelete: Cascade)
   session     PracticeSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-  media       MediaAsset     @relation(fields: [mediaId], references: [id], onDelete: Cascade)
+  media       MediaAsset      @relation(fields: [mediaId], references: [id], onDelete: Cascade)
   goals       Goal[]
 
   @@index([mediaId, startMs])
@@ -212,29 +231,31 @@ model Annotation {
 }
 
 model Goal {
-  id                 String              @id @default(uuid()) @db.Uuid
-  userId             String              @map("user_id") @db.Uuid
-  sourceSessionId    String              @map("source_session_id") @db.Uuid
-  annotationId       String?             @map("annotation_id") @db.Uuid
-  title              String              @db.VarChar(160)
-  category           GoalCategory
-  metricType         MetricType          @map("metric_type")
-  baselineValue      Decimal?            @map("baseline_value") @db.Decimal(14, 4)
-  targetValue        Decimal             @map("target_value") @db.Decimal(14, 4)
-  unit               String              @db.VarChar(24)
-  dueDate            DateTime            @map("due_date") @db.Date
-  method             String?
+  id                  String              @id @default(uuid()) @db.Uuid
+  userId              String              @map("user_id") @db.Uuid
+  sourceSessionId     String              @map("source_session_id") @db.Uuid
+  annotationId        String?             @map("annotation_id") @db.Uuid
+  title               String              @db.VarChar(160)
+  category            GoalCategory
+  metricType          MetricType          @map("metric_type")
+  baselineValue       Decimal?            @map("baseline_value") @db.Decimal(14, 4)
+  targetValue         Decimal             @map("target_value") @db.Decimal(14, 4)
+  unit                String              @db.VarChar(24)
+  dueDate             DateTime            @map("due_date") @db.Date
+  method              String?
   evidenceRequirement EvidenceRequirement @map("evidence_requirement")
-  status             GoalStatus          @default(OPEN)
-  completedAt        DateTime?           @map("completed_at") @db.Timestamptz(6)
-  cancelledReason    String?             @map("cancelled_reason")
-  version            Int                 @default(0)
-  createdAt          DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt          DateTime            @updatedAt @map("updated_at") @db.Timestamptz(6)
-  user               User                @relation(fields: [userId], references: [id], onDelete: Cascade)
-  sourceSession      PracticeSession     @relation(fields: [sourceSessionId], references: [id], onDelete: Cascade)
-  annotation         Annotation?         @relation(fields: [annotationId], references: [id], onDelete: SetNull)
-  progresses         GoalProgress[]
+  status              GoalStatus          @default(OPEN)
+  completedAt         DateTime?           @map("completed_at") @db.Timestamptz(6)
+  cancelledReason     String?             @map("cancelled_reason")
+  version             Int                 @default(0)
+  createdAt           DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt           DateTime            @updatedAt @map("updated_at") @db.Timestamptz(6)
+  user                User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sourceSession       PracticeSession     @relation(fields: [sourceSessionId], references: [id], onDelete: Cascade)
+  annotation          Annotation?         @relation(fields: [annotationId], references: [id], onDelete: SetNull)
+  progresses          GoalProgress[]
+  practicePlans       PracticePlan[]
+  planTasks           PlanTask[]
 
   @@index([userId, status, dueDate])
   @@index([sourceSessionId])
@@ -279,16 +300,16 @@ model SessionReview {
 }
 
 model DataExport {
-  id         String        @id @default(uuid()) @db.Uuid
-  userId     String        @map("user_id") @db.Uuid
-  format     String        @db.VarChar(8)
-  status     ExportStatus  @default(PENDING)
-  objectKey  String?       @map("object_key") @db.Text
-  failure    String?       @db.VarChar(500)
-  expiresAt  DateTime?     @map("expires_at") @db.Timestamptz(6)
-  createdAt  DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt  DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
-  user       User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id        String       @id @default(uuid()) @db.Uuid
+  userId    String       @map("user_id") @db.Uuid
+  format    String       @db.VarChar(8)
+  status    ExportStatus @default(PENDING)
+  objectKey String?      @map("object_key") @db.Text
+  failure   String?      @db.VarChar(500)
+  expiresAt DateTime?    @map("expires_at") @db.Timestamptz(6)
+  createdAt DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
+  user      User         @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, createdAt(sort: Desc)])
   @@map("data_exports")
@@ -310,4 +331,117 @@ model AuditLog {
   @@index([userId, createdAt(sort: Desc)])
   @@index([action, createdAt(sort: Desc)])
   @@map("audit_logs")
+}
+
+// 练习计划编排器：目标 -> 计划 -> 阶段 -> 任务，任务可关联音频证据。
+// 谱系（copiedFromId/rootAncestorId）与版本链（versionChainId/previousVersionId）
+// 使用普通 UUID 列而非外键，祖先或旧版本被删除后谱系仍然完整可查。
+model PracticePlan {
+  id                String             @id @default(uuid()) @db.Uuid
+  userId            String             @map("user_id") @db.Uuid
+  goalId            String?            @map("goal_id") @db.Uuid
+  title             String             @db.VarChar(160)
+  description       String?
+  instrument        String?            @map("instrument") @db.VarChar(60)
+  status            PlanStatus         @default(DRAFT)
+  isTemplate        Boolean            @default(false) @map("is_template")
+  versionChainId    String             @map("version_chain_id") @db.Uuid
+  versionNumber     Int                @default(1) @map("version_number")
+  previousVersionId String?            @map("previous_version_id") @db.Uuid
+  chainHead         Boolean            @default(true) @map("chain_head")
+  lockedAt          DateTime?          @map("locked_at") @db.Timestamptz(6)
+  changeNote        String?            @map("change_note") @db.VarChar(500)
+  copiedFromId      String?            @map("copied_from_id") @db.Uuid
+  rootAncestorId    String?            @map("root_ancestor_id") @db.Uuid
+  totalTasks        Int                @default(0) @map("total_tasks")
+  doneTasks         Int                @default(0) @map("done_tasks")
+  skippedTasks      Int                @default(0) @map("skipped_tasks")
+  progressPct       Int                @default(0) @map("progress_pct")
+  recomputedAt      DateTime?          @map("recomputed_at") @db.Timestamptz(6)
+  startDate         DateTime?          @map("start_date") @db.Date
+  dueDate           DateTime?          @map("due_date") @db.Date
+  revision          Int                @default(0)
+  createdAt         DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
+  user              User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  goal              Goal?              @relation(fields: [goalId], references: [id], onDelete: SetNull)
+  phases            PlanPhase[]
+  tasks             PlanTask[]
+  evidences         PlanTaskEvidence[]
+
+  @@index([userId, status, updatedAt(sort: Desc)])
+  @@index([userId, isTemplate])
+  @@index([userId, chainHead])
+  @@index([versionChainId, versionNumber])
+  @@index([copiedFromId])
+  @@index([rootAncestorId])
+  @@map("practice_plans")
+}
+
+model PlanPhase {
+  id           String       @id @default(uuid()) @db.Uuid
+  planId       String       @map("plan_id") @db.Uuid
+  userId       String       @map("user_id") @db.Uuid
+  title        String       @db.VarChar(160)
+  description  String?
+  orderIndex   Int          @map("order_index")
+  totalTasks   Int          @default(0) @map("total_tasks")
+  doneTasks    Int          @default(0) @map("done_tasks")
+  skippedTasks Int          @default(0) @map("skipped_tasks")
+  progressPct  Int          @default(0) @map("progress_pct")
+  createdAt    DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
+  plan         PracticePlan @relation(fields: [planId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tasks        PlanTask[]
+
+  @@index([planId, orderIndex])
+  @@map("plan_phases")
+}
+
+model PlanTask {
+  id                  String              @id @default(uuid()) @db.Uuid
+  planId              String              @map("plan_id") @db.Uuid
+  phaseId             String              @map("phase_id") @db.Uuid
+  userId              String              @map("user_id") @db.Uuid
+  title               String              @db.VarChar(200)
+  description         String?
+  orderIndex          Int                 @map("order_index")
+  status              PlanTaskStatus      @default(PENDING)
+  evidenceRequirement EvidenceRequirement @default(NONE) @map("evidence_requirement")
+  estimateMinutes     Int?                @map("estimate_minutes")
+  dueDate             DateTime?           @map("due_date") @db.Date
+  linkedGoalId        String?             @map("linked_goal_id") @db.Uuid
+  selfReviewNote      String?             @map("self_review_note")
+  completedAt         DateTime?           @map("completed_at") @db.Timestamptz(6)
+  createdAt           DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt           DateTime            @updatedAt @map("updated_at") @db.Timestamptz(6)
+  plan                PracticePlan        @relation(fields: [planId], references: [id], onDelete: Cascade)
+  phase               PlanPhase           @relation(fields: [phaseId], references: [id], onDelete: Cascade)
+  user                User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  linkedGoal          Goal?               @relation(fields: [linkedGoalId], references: [id], onDelete: SetNull)
+  evidences           PlanTaskEvidence[]
+
+  @@index([phaseId, orderIndex])
+  @@index([planId, status])
+  @@map("plan_tasks")
+}
+
+model PlanTaskEvidence {
+  id        String       @id @default(uuid()) @db.Uuid
+  taskId    String       @map("task_id") @db.Uuid
+  planId    String       @map("plan_id") @db.Uuid
+  userId    String       @map("user_id") @db.Uuid
+  mediaId   String       @map("media_id") @db.Uuid
+  note      String?      @db.VarChar(500)
+  createdAt DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  task      PlanTask     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  plan      PracticePlan @relation(fields: [planId], references: [id], onDelete: Cascade)
+  user      User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  media     MediaAsset   @relation(fields: [mediaId], references: [id], onDelete: Cascade)
+
+  @@unique([taskId, mediaId])
+  @@index([planId])
+  @@index([userId, createdAt(sort: Desc)])
+  @@map("plan_task_evidences")
 }

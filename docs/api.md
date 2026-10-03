@@ -69,6 +69,7 @@ Refresh Cookie 路径为 `/api/v1/auth`，生产环境在 HTTPS 下自动使用 
 |---|---|---|
 | POST | `/sessions/:sessionId/media/uploads` | 创建上传会话并返回预签名 PUT URL |
 | POST | `/media/:mediaId/complete-upload` | 校验对象大小/SHA-256 并投递探测任务 |
+| GET | `/media` | 音频列表（默认 `status=READY`，光标分页） |
 | GET | `/media/:mediaId` | 状态、元数据与波形峰值 |
 | GET | `/media/:mediaId/playback-url` | 获取短期私有播放地址 |
 | POST | `/media/:mediaId/retry-probe` | 重试音频探测 |
@@ -113,6 +114,35 @@ Refresh Cookie 路径为 `/api/v1/auth`，生产环境在 HTTPS 下自动使用 
 | GET/POST | `/goals/:id/progress` | 进度列表/新增 |
 
 完成复盘请求会原子写入复盘、目标、进度并更新练习状态。任一步失败时全部回滚，返回 `REVIEW_INCOMPLETE` 且 `details` 为缺失项数组。
+
+## 计划编排
+
+计划把目标拆成阶段与任务；任务可要求音频证据或自评才能标记完成。计划可存为模板，复制时保留谱系（`copiedFromId` / `rootAncestorId`）；锁定后结构只读，改版生成同一版本链上的新版本（`versionChainId` + `versionNumber`），执行进度完整携带。进度以任务状态为唯一事实来源，任何变更后自动复算，也可手动触发。
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/plans` | 计划列表，支持 `status`、`isTemplate`、`headOnly` 过滤 |
+| POST | `/plans` | 创建计划，可内嵌 `phases[].tasks[]` |
+| GET | `/plans/:id` | 计划详情，含阶段、任务与证据 |
+| PATCH | `/plans/:id` | 乐观锁更新元信息；请求必须带 `revision`，锁定后返回 `PLAN_LOCKED` |
+| POST | `/plans/:id/lock` / `unlock` | 锁定/解锁；仅版本链首可解锁 |
+| POST | `/plans/:id/revise` | 已锁定计划改版为 v+1 新版本，携带任务状态与证据 |
+| POST | `/plans/:id/copy` | 复制为全新执行的计划（或模板），保留复制谱系 |
+| GET | `/plans/:id/lineage` | 复制祖先链与同源计划家族 |
+| GET | `/plans/:id/versions` | 版本链上的全部版本 |
+| POST | `/plans/:id/activate` / `complete` / `archive` | 生命周期流转 |
+| POST | `/plans/:id/recompute` | 手动复算阶段与计划进度 |
+| POST/PATCH/DELETE | `/plans/:id/phases[/:phaseId]` | 阶段增改删（锁定后拒绝） |
+| POST | `/plans/:id/phases/:phaseId/tasks` | 新增任务 |
+| PATCH/DELETE | `/plans/:id/tasks/:taskId` | 任务改删（锁定后拒绝） |
+| POST | `/plans/:id/tasks/:taskId/status` | 任务状态流转；完成时校验证据门槛 |
+| POST/DELETE | `/plans/:id/tasks/:taskId/evidence[/:evidenceId]` | 关联/移除音频证据 |
+
+关键规则：
+
+- 锁定只冻结结构（元信息、阶段、任务定义）；任务执行与证据关联仅允许在非模板的链首版本上进行。
+- 任务证据门槛：`AUDIO` 需至少一段 `READY` 音频，`SELF_REVIEW` 需自评说明，`AUDIO_AND_SELF_REVIEW` 两者都要；不满足时返回 `TASK_REQUIREMENTS_MISSING` 且 `details` 为缺失项。
+- 进度口径：`SKIPPED` 任务移出分母，百分比 = 已完成 ÷（总数 − 已跳过），四舍五入取整；阶段与计划共用同一口径。
 
 ## 统计与导出
 

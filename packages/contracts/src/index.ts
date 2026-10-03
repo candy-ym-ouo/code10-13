@@ -38,6 +38,8 @@ export const METRIC_TYPES = [
 ] as const;
 export const EVIDENCE_REQUIREMENTS = ["NONE", "AUDIO", "SELF_REVIEW", "AUDIO_AND_SELF_REVIEW"] as const;
 export const GOAL_STATUSES = ["OPEN", "IN_PROGRESS", "ACHIEVED", "MISSED", "CANCELLED"] as const;
+export const PLAN_STATUSES = ["DRAFT", "ACTIVE", "COMPLETED", "ARCHIVED"] as const;
+export const PLAN_TASK_STATUSES = ["PENDING", "IN_PROGRESS", "DONE", "SKIPPED"] as const;
 
 const requiredText = (label: string, max: number) =>
   z.string().trim().min(1, `${label}不能为空`).max(max, `${label}不能超过 ${max} 个字符`);
@@ -188,6 +190,77 @@ export const completionSchema = z.object({
   annotationVersion: z.coerce.number().int().nonnegative().optional(),
 });
 
+export const planTaskInputSchema = z.object({
+  title: requiredText("任务标题", 200),
+  description: optionalText(2000, "任务说明"),
+  evidenceRequirement: z.enum(EVIDENCE_REQUIREMENTS).default("NONE"),
+  estimateMinutes: z.coerce.number().int().positive().max(100_000).optional().nullable(),
+  dueDate: z.coerce.date().optional().nullable(),
+  linkedGoalId: z.string().uuid().optional().nullable(),
+});
+export const planPhaseInputSchema = z.object({
+  title: requiredText("阶段标题", 160),
+  description: optionalText(2000, "阶段说明"),
+  tasks: z.array(planTaskInputSchema).max(100).default([]),
+});
+export const planCreateSchema = z.object({
+  title: requiredText("计划标题", 160),
+  description: optionalText(5000, "计划说明"),
+  instrument: optionalText(60, "乐器"),
+  goalId: z.string().uuid().optional().nullable(),
+  isTemplate: z.boolean().default(false),
+  startDate: z.coerce.date().optional().nullable(),
+  dueDate: z.coerce.date().optional().nullable(),
+  phases: z.array(planPhaseInputSchema).max(50).default([]),
+});
+export const planUpdateSchema = planCreateSchema
+  .omit({ phases: true, isTemplate: true })
+  .partial()
+  .extend({
+    isTemplate: z.boolean().optional(),
+    revision: z.coerce.number().int().nonnegative(),
+  });
+const queryFlag = z
+  .enum(["true", "false"])
+  .transform((value) => value === "true")
+  .optional();
+export const planListQuerySchema = z.object({
+  status: z.enum(PLAN_STATUSES).optional(),
+  isTemplate: queryFlag,
+  headOnly: queryFlag,
+  cursor: z.string().uuid().optional(),
+  limit: z.coerce.number().int().min(1).max(100).default(30),
+});
+export const planPhaseCreateSchema = planPhaseInputSchema.omit({ tasks: true });
+export const planPhaseUpdateSchema = planPhaseCreateSchema.partial().extend({
+  orderIndex: z.coerce.number().int().min(0).max(10_000).optional(),
+});
+export const planTaskCreateSchema = planTaskInputSchema;
+export const planTaskUpdateSchema = planTaskInputSchema.partial().extend({
+  orderIndex: z.coerce.number().int().min(0).max(10_000).optional(),
+  phaseId: z.string().uuid().optional(),
+});
+export const planTaskStatusSchema = z.object({
+  status: z.enum(PLAN_TASK_STATUSES),
+  selfReviewNote: optionalText(2000, "自评说明"),
+});
+export const planEvidenceCreateSchema = z.object({
+  mediaId: z.string().uuid(),
+  note: optionalText(500, "证据备注"),
+});
+export const planCopySchema = z.object({
+  title: requiredText("计划标题", 160).optional(),
+  asTemplate: z.boolean().default(false),
+});
+export const planReviseSchema = z.object({
+  changeNote: optionalText(500, "改版说明"),
+});
+export const mediaListQuerySchema = z.object({
+  status: z.enum(MEDIA_STATUSES).default("READY"),
+  cursor: z.string().uuid().optional(),
+  limit: z.coerce.number().int().min(1).max(100).default(50),
+});
+
 export const statisticsRangeSchema = z.object({
   from: z.coerce.date(),
   to: z.coerce.date(),
@@ -210,6 +283,8 @@ export type GoalCategory = (typeof GOAL_CATEGORIES)[number];
 export type MetricType = (typeof METRIC_TYPES)[number];
 export type GoalStatus = (typeof GOAL_STATUSES)[number];
 export type EvidenceRequirement = (typeof EVIDENCE_REQUIREMENTS)[number];
+export type PlanStatus = (typeof PLAN_STATUSES)[number];
+export type PlanTaskStatus = (typeof PLAN_TASK_STATUSES)[number];
 
 export interface ApiErrorBody {
   error: {
@@ -255,6 +330,43 @@ export function validateAnnotationRange(
 
 export function isGoalProgressValid(actualValue: number, targetValue: number): boolean {
   return Number.isFinite(actualValue) && Number.isFinite(targetValue) && actualValue >= targetValue;
+}
+
+export interface ProgressCounts {
+  total: number;
+  done: number;
+  skipped: number;
+  percent: number;
+}
+
+/**
+ * 进度复算口径：SKIPPED 任务视为移出范围，不计入分母；
+ * 全部跳过或没有任务时进度为 0。同一函数同时服务阶段与计划两个层级。
+ */
+export function computeProgressCounts(statuses: ReadonlyArray<PlanTaskStatus>): ProgressCounts {
+  const total = statuses.length;
+  const done = statuses.filter((status) => status === "DONE").length;
+  const skipped = statuses.filter((status) => status === "SKIPPED").length;
+  const effective = total - skipped;
+  const percent = effective > 0 ? Math.round((done / effective) * 100) : 0;
+  return { total, done, skipped, percent };
+}
+
+/**
+ * 任务标记为 DONE 前的证据门槛：返回缺失项描述，空数组表示可以完成。
+ * 证据只在状态迁移时校验，之后的进度复算只读取任务状态。
+ */
+export function describeTaskCompletionMissing(input: {
+  evidenceRequirement: EvidenceRequirement;
+  evidenceCount: number;
+  selfReviewNote?: string | null;
+}): string[] {
+  const missing: string[] = [];
+  const needsAudio = input.evidenceRequirement === "AUDIO" || input.evidenceRequirement === "AUDIO_AND_SELF_REVIEW";
+  const needsReview = input.evidenceRequirement === "SELF_REVIEW" || input.evidenceRequirement === "AUDIO_AND_SELF_REVIEW";
+  if (needsAudio && input.evidenceCount < 1) missing.push("请先为任务关联至少一段音频证据");
+  if (needsReview && !input.selfReviewNote?.trim()) missing.push("请填写本次自评说明");
+  return missing;
 }
 
 export function calculateSessionDuration(mediaDurationsMs: Array<number | null | undefined>): number {

@@ -66,3 +66,24 @@ export const goalStatusLabels = {
   MISSED: "已逾期",
   CANCELLED: "已取消",
 } as const;
+
+export const planStatusLabels = {
+  DRAFT: "草稿",
+  ACTIVE: "进行中",
+  COMPLETED: "已完成",
+  ARCHIVED: "已归档",
+} as const;
+
+export const planTaskStatusLabels = {
+  PENDING: "待开始",
+  IN_PROGRESS: "进行中",
+  DONE: "已完成",
+  SKIPPED: "已跳过",
+} as const;
+
+export const evidenceRequirementLabels = {
+  NONE: "无证据要求",
+  AUDIO: "需要音频",
+  SELF_REVIEW: "需要自评",
+  AUDIO_AND_SELF_REVIEW: "需要音频与自评",
+} as const;
